@@ -1,0 +1,1 @@
+# Ukraininan-proverbs-and-adages
