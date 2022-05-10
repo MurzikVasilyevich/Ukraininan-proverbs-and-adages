@@ -1,5 +1,4 @@
 import concurrent.futures
-import logging
 import math
 import os
 from uuid import uuid4
@@ -26,9 +25,7 @@ class PdfFile:
         self.get_pages()
 
     def get_pages(self):
-
         pdf = requests.get(self.file_url, stream=True)
-        logging.info(f'Processing {self.file_name} with {self.thread_count} threads')
         pages = convert_from_bytes(pdf.raw.read(),
                                    first_page=self.first_page, last_page=self.last_page,
                                    dpi=300, thread_count=self.thread_count, fmt="png")
@@ -107,11 +104,11 @@ class PdfFiles:
         self.get_files()
 
     def get_files(self):
-        logging.info('Getting files from sources file')
         sources = pd.read_csv(self.sources_file)
         for index, row in sources.iterrows():
             file_url = row['file_url']
-            pages_folder = row['pages_folder']
+            pages_folder = row['alias']
+            alias = row['alias']
             first_page = int(row['first_page'])
             last_page = int(row['last_page'])
             os.makedirs(pages_folder, exist_ok=True)
@@ -119,18 +116,11 @@ class PdfFiles:
             self.files.append(pdf_file)
             df = pd.DataFrame(pdf_file.results)
             df.sort_values(by=['page', 'contour'], ascending=[True, False], inplace=True)
-            df.to_csv(os.path.join(pages_folder, 'results.csv'), index=False)
+            df.to_csv(os.path.join(settings.RESULTS_FOLDER, f'{alias}.csv'), index=False)
 
 
 def main():
-    logger = logging.getLogger('main')
-    logger.setLevel(logging.DEBUG)
-    ch = logging.StreamHandler()
-    ch.setLevel(logging.DEBUG)
-    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    ch.setFormatter(formatter)
-    logger.addHandler(ch)
-
+    os.makedirs(settings.RESULTS_FOLDER, exist_ok=False)
     PdfFiles(settings.SOURCES_FILE)
 
 
