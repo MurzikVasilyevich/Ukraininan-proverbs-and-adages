@@ -31,10 +31,10 @@ class PdfFile:
                                    first_page=self.first_page, last_page=self.last_page,
                                    dpi=300, thread_count=self.thread_count, fmt="png")
         print(f"Processing {len(pages)} pages")
-        for i, page in enumerate(pages):
-            self.save_page_file(page, i)
-        # with concurrent.futures.ThreadPoolExecutor() as page_executor:
-        #     page_executor.map(self.save_page_file, pages, range(len(pages)))
+        # for i, page in enumerate(pages):
+        #    self.save_page_file(page, i)
+        with concurrent.futures.ThreadPoolExecutor() as page_executor:
+             page_executor.map(self.save_page_file, pages, range(len(pages)))
 
     def save_page_file(self, image, i):
         filepath_rel = os.path.join(self.pages_folder,
@@ -68,10 +68,10 @@ class Page:
         return self.contours
 
     def get_results(self):
-        for i, contour in enumerate(self.contours):
-            self.get_text(contour, i)
-        # with concurrent.futures.ThreadPoolExecutor() as contour_executor:
-        #     contour_executor.map(self.get_text, self.contours, range(len(self.contours)))
+        # for i, contour in enumerate(self.contours):
+        #     self.get_text(contour, i)
+        with concurrent.futures.ThreadPoolExecutor() as contour_executor:
+            contour_executor.map(self.get_text, self.contours, range(len(self.contours)))
 
     def get_text(self, contour, contour_id):
         image_height, image_width, channels = self.image.shape
