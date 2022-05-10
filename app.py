@@ -115,7 +115,7 @@ class PdfFiles:
             pdf_file = PdfFile(file_url, pages_folder, first_page, last_page)
             self.files.append(pdf_file)
             df = pd.DataFrame(pdf_file.results)
-            df.sort_values(by=['page', 'contour'], ascending=[True, False], inplace=True)
+            # df.sort_values(by=['page', 'contour'], ascending=[True, False], inplace=True)
             df.to_csv(os.path.join(settings.RESULTS_FOLDER, f'{alias}.csv'), index=False)
 
 
