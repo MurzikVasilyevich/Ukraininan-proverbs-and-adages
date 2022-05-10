@@ -1,2 +1,2 @@
 SOURCES_FILE = 'sources.csv'
-RESULTS_FOLDER = 'results'
+RESULTS_FOLDER = 'temp/results'

@@ -25,11 +25,12 @@ class PdfFile:
         self.get_pages()
 
     def get_pages(self):
+        print(f"Downloading {self.file_url}")
         pdf = requests.get(self.file_url, stream=True)
         pages = convert_from_bytes(pdf.raw.read(),
                                    first_page=self.first_page, last_page=self.last_page,
                                    dpi=300, thread_count=self.thread_count, fmt="png")
-
+        print(f"Processing {len(pages)} pages")
         with concurrent.futures.ThreadPoolExecutor() as page_executor:
             page_executor.map(self.save_page_file, pages, range(len(pages)))
 
@@ -107,7 +108,7 @@ class PdfFiles:
         sources = pd.read_csv(self.sources_file)
         for index, row in sources.iterrows():
             file_url = row['file_url']
-            pages_folder = row['alias']
+            pages_folder = os.path.join('temp', row['alias'])
             alias = row['alias']
             first_page = int(row['first_page'])
             last_page = int(row['last_page'])
@@ -120,7 +121,7 @@ class PdfFiles:
 
 
 def main():
-    os.makedirs(settings.RESULTS_FOLDER, exist_ok=False)
+    os.makedirs(settings.RESULTS_FOLDER) if not os.path.exists(settings.RESULTS_FOLDER) else None
     PdfFiles(settings.SOURCES_FILE)
 
 
