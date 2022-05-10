@@ -1,0 +1,6 @@
+opencv-python
+pytesseract
+pandas
+pdf2image
+pillow
+requests
