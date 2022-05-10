@@ -2,4 +2,4 @@
 
 Створення корпусу, що містить українські прислів'я та приказки з категоризацією.
 
-Вхідні файли розташовані на [Google Drive](https://drive.google.com/drive/folders/11ZGL0Q8fj4ApJS_atXBTMA-Z1ZMNXhbT?usp=sharing).
+Вхідні файли розташовані на [Dropbox](https://www.dropbox.com/sh/r9uco3zk8octjoa/AADBjFb_gKtvALAeX0kj7iO3a?dl=0).
