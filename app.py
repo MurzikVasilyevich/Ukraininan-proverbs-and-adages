@@ -13,11 +13,14 @@ import settings
 
 
 class PdfFile:
-    def __init__(self, file_url, pages_folder, first_page, last_page):
+    def __init__(self, file_url, pages_folder, first_page, last_page, morph_rect, threshold):
         self.file_url = file_url
         self.first_page = first_page
         self.last_page = last_page
-        self.thread_count = (5 if last_page - first_page > 5 else int(math.ceil((last_page - first_page) * 0.1))) if settings.THREADING else 1
+        self.morph_rect = morph_rect
+        self.threshold = threshold
+        self.thread_count = (5 if last_page - first_page > 5 else int(
+            math.ceil((last_page - first_page) * 0.1))) if settings.THREADING else 1
         self.pages_folder = pages_folder
         self.file_name = os.path.basename(file_url)
         self.pages = []
@@ -26,6 +29,7 @@ class PdfFile:
 
     def get_pages(self):
         print(f"Downloading {self.file_url}")
+        create_folder(os.path.join(self.pages_folder, "pages"))
         pdf = requests.get(self.file_url, stream=True)
         print(f"Working in {self.thread_count} threads") if settings.THREADING else print("Working in 1 thread")
         pages = convert_from_bytes(pdf.raw.read(),
@@ -40,8 +44,8 @@ class PdfFile:
                 self.save_page_file(page, i)
 
     def save_page_file(self, image, i):
-        filepath_rel = os.path.join(self.pages_folder,
-                                    str(i).zfill(3) + '.png')
+        create_folder(os.path.join(self.pages_folder, "pages", str(i).zfill(3)))
+        filepath_rel = os.path.join(self.pages_folder, "pages", str(i).zfill(3) + '.png')
         image.save(filepath_rel, 'png')
         print(f'Saving page {i} to {filepath_rel}')
         if settings.OCR:
@@ -64,7 +68,7 @@ class Page:
         blur = cv2.GaussianBlur(gray, (7, 7), 0)
         thresh = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)[1]
 
-        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (16, 8))
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, self.pdf.morph_rect)
         dilate = cv2.dilate(thresh, kernel, iterations=4)
 
         contours = cv2.findContours(dilate, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -78,13 +82,23 @@ class Page:
         else:
             for i, contour in enumerate(self.contours):
                 self.get_text(contour, i)
+        df = pd.DataFrame(self.results)
+        df.sort_values(by=['page', 'contour'], ascending=[True, True], inplace=True)
+        df_text = df['text']
+        df_text.to_csv(os.path.join(self.pdf.pages_folder, str(self.page_number).zfill(3) + '.csv'))
 
     def get_text(self, contour, contour_id):
         image_height, image_width, channels = self.image.shape
         x, y, w, h = cv2.boundingRect(contour)
-        if w > 100 and h > 30:
+        if w > self.pdf.threshold[0] and h > self.pdf.threshold[1]:
             cropped_image = self.image[y:y + h, x:x + w]
-            text = pytesseract.image_to_string(cropped_image, lang='ukr', config='--psm 1').replace('\n', ' ')
+            cropped_file_path = os.path.join(self.pdf.pages_folder,
+                                             "pages",
+                                             str(self.page_number).zfill(3),
+                                             str(contour_id).zfill(2) + '.png')
+            print(f'Saving contour {contour_id} to {cropped_file_path}')
+            text = pytesseract.image_to_string(cropped_image, lang=settings.OCR_LANG, config='--psm 1').replace('\n', ' ')
+            cv2.imwrite(cropped_file_path, cropped_image)
             print(text)
             bbox = Bbox(x, y, w, h, image_width, image_height)
             region_id = str(uuid4())
@@ -125,8 +139,10 @@ class PdfFiles:
             alias = row['alias']
             first_page = int(row['first_page'])
             last_page = int(row['last_page'])
+            morph_rect = eval(row['MORPH_RECT'])
+            threshold = eval(row['THRESHOLD'])
             os.makedirs(pages_folder, exist_ok=True)
-            pdf_file = PdfFile(file_url, pages_folder, first_page, last_page)
+            pdf_file = PdfFile(file_url, pages_folder, first_page, last_page, morph_rect, threshold)
             self.files.append(pdf_file)
             if settings.OCR:
                 df = pd.DataFrame(pdf_file.results)
@@ -135,8 +151,12 @@ class PdfFiles:
 
 
 def main():
-    os.makedirs(settings.RESULTS_FOLDER) if not os.path.exists(settings.RESULTS_FOLDER) else None
+    create_folder(folder=settings.RESULTS_FOLDER)
     PdfFiles(settings.SOURCES_FILE)
+
+
+def create_folder(folder):
+    os.makedirs(folder) if not os.path.exists(folder) else None
 
 
 if __name__ == '__main__':
