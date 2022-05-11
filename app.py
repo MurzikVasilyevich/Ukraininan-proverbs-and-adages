@@ -17,7 +17,7 @@ class PdfFile:
         self.file_url = file_url
         self.first_page = first_page
         self.last_page = last_page
-        self.thread_count = 5 if last_page - first_page > 5 else int(math.ceil((last_page - first_page) * 0.1))
+        self.thread_count = (5 if last_page - first_page > 5 else int(math.ceil((last_page - first_page) * 0.1))) if settings.THREADING else 1
         self.pages_folder = pages_folder
         self.file_name = os.path.basename(file_url)
         self.pages = []
@@ -27,22 +27,26 @@ class PdfFile:
     def get_pages(self):
         print(f"Downloading {self.file_url}")
         pdf = requests.get(self.file_url, stream=True)
+        print(f"Working in {self.thread_count} threads") if settings.THREADING else print("Working in 1 thread")
         pages = convert_from_bytes(pdf.raw.read(),
                                    first_page=self.first_page, last_page=self.last_page,
                                    dpi=300, thread_count=self.thread_count, fmt="png")
         print(f"Processing {len(pages)} pages")
-        # for i, page in enumerate(pages):
-        #    self.save_page_file(page, i)
-        with concurrent.futures.ThreadPoolExecutor() as page_executor:
-             page_executor.map(self.save_page_file, pages, range(len(pages)))
+        if settings.THREADING:
+            with concurrent.futures.ThreadPoolExecutor() as page_executor:
+                page_executor.map(self.save_page_file, pages, range(len(pages)))
+        else:
+            for i, page in enumerate(pages):
+                self.save_page_file(page, i)
 
     def save_page_file(self, image, i):
         filepath_rel = os.path.join(self.pages_folder,
                                     str(i).zfill(3) + '.png')
         image.save(filepath_rel, 'png')
-        page = Page(self, filepath_rel, i)
-        # print(f'Saving page {page.page_number} to {filepath_rel}')
-        self.pages.append(page)
+        print(f'Saving page {i} to {filepath_rel}')
+        if settings.OCR:
+            page = Page(self, filepath_rel, i)
+            self.pages.append(page)
 
 
 class Page:
@@ -60,7 +64,7 @@ class Page:
         blur = cv2.GaussianBlur(gray, (7, 7), 0)
         thresh = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)[1]
 
-        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (12, 10))
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (16, 8))
         dilate = cv2.dilate(thresh, kernel, iterations=4)
 
         contours = cv2.findContours(dilate, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -68,38 +72,43 @@ class Page:
         return self.contours
 
     def get_results(self):
-        # for i, contour in enumerate(self.contours):
-        #     self.get_text(contour, i)
-        with concurrent.futures.ThreadPoolExecutor() as contour_executor:
-            contour_executor.map(self.get_text, self.contours, range(len(self.contours)))
+        if settings.THREADING:
+            with concurrent.futures.ThreadPoolExecutor() as contour_executor:
+                contour_executor.map(self.get_text, self.contours, range(len(self.contours)))
+        else:
+            for i, contour in enumerate(self.contours):
+                self.get_text(contour, i)
 
     def get_text(self, contour, contour_id):
         image_height, image_width, channels = self.image.shape
         x, y, w, h = cv2.boundingRect(contour)
-        if w > 100 and h > 20:
+        if w > 100 and h > 30:
             cropped_image = self.image[y:y + h, x:x + w]
             text = pytesseract.image_to_string(cropped_image, lang='ukr', config='--psm 1').replace('\n', ' ')
             print(text)
-            bbox = {
-                'x': 100 * x / image_width,
-                'y': 100 * y / image_height,
-                'width': 100 * w / image_width,
-                'height': 100 * h / image_height,
-                'rotation': 0
-            }
+            bbox = Bbox(x, y, w, h, image_width, image_height)
             region_id = str(uuid4())
             result = {
                 'region_id': region_id,
                 'text': text,
                 'page': self.page_number,
                 'contour': contour_id,
-                'x': bbox['x'],
-                'y': bbox['y'],
-                'width': bbox['width'],
-                'height': bbox['height']
+                'x': bbox.x,
+                'y': bbox.y,
+                'width': bbox.width,
+                'height': bbox.height
             }
             self.results.append(result)
             self.pdf.results.append(result)
+
+
+class Bbox:
+    def __init__(self, x, y, w, h, image_width, image_height, rotation=0):
+        self.x = 100 * x / image_width
+        self.y = 100 * y / image_height
+        self.width = 100 * w / image_width
+        self.height = 100 * h / image_height
+        self.rotation = rotation
 
 
 class PdfFiles:
@@ -119,9 +128,10 @@ class PdfFiles:
             os.makedirs(pages_folder, exist_ok=True)
             pdf_file = PdfFile(file_url, pages_folder, first_page, last_page)
             self.files.append(pdf_file)
-            df = pd.DataFrame(pdf_file.results)
-            # df.sort_values(by=['page', 'contour'], ascending=[True, False], inplace=True)
-            df.to_csv(os.path.join(settings.RESULTS_FOLDER, f'{alias}.csv'), index=False)
+            if settings.OCR:
+                df = pd.DataFrame(pdf_file.results)
+                df.sort_values(by=['page', 'contour'], ascending=[True, False], inplace=True)
+                df.to_csv(os.path.join(settings.RESULTS_FOLDER, f'{alias}.csv'), index=False)
 
 
 def main():
