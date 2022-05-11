@@ -1,3 +1,4 @@
+import re
 import concurrent.futures
 import math
 import os
@@ -10,6 +11,35 @@ import requests
 from pdf2image import convert_from_bytes
 
 import settings
+
+
+def text_cleaner(text):
+    text = text.replace('\n', ' ')
+    text = text.replace('\r', ' ')
+    text = text.replace('\t', ' ')
+    text = text.replace('  ', ' ')
+    text = re.sub(r'^\s*\w\.*\s+', '', text)
+    text = re.sub(r',\s*$', '.', text)
+    text = re.sub(r"\s+\w\.*\s*$", '', text)
+    text = re.sub(r" \w--  ", '', text)
+    text = re.sub(r"(\w)- (\w)", r'\1\2', text)
+    text = re.sub(r"(\w)(--)(\s+)", r'\1 - ', text)
+    text = re.sub(r"--", r'', text)
+    text = " ".join(text.split())
+    return text
+
+
+def text_filter(text):
+    digits = re.compile(r"^\d*$")
+    non_words = re.compile(r"^\W*$")
+    if digits.match(text):
+        return False
+    if len(text) < 3:
+        return False
+    if non_words.match(text):
+        return False
+
+    return True
 
 
 class PdfFile:
@@ -97,7 +127,10 @@ class Page:
                                              str(self.page_number).zfill(3),
                                              str(contour_id).zfill(2) + '.png')
             print(f'Saving contour {contour_id} to {cropped_file_path}')
-            text = pytesseract.image_to_string(cropped_image, lang=settings.OCR_LANG, config='--psm 1').replace('\n', ' ')
+            text = pytesseract.image_to_string(cropped_image, lang=settings.OCR_LANG, config='--psm 1')
+            text = text_cleaner(text)
+            if not text_filter(text):
+                return False
             cv2.imwrite(cropped_file_path, cropped_image)
             print(text)
             bbox = Bbox(x, y, w, h, image_width, image_height)
