@@ -2,6 +2,7 @@ import concurrent.futures
 import math
 import os
 from uuid import uuid4
+import shutil
 
 import cv2
 import pandas as pd
@@ -26,13 +27,13 @@ class PdfFile:
         self.last_page = last_page
         self.morph_rect = morph_rect
         self.threshold = threshold
-        self.thread_count = (5 if last_page - first_page > 5 else int(
-            math.ceil((last_page - first_page) * 0.1))) if settings.THREADING else 1
+        self.thread_count = (int(math.ceil((last_page - first_page) * 0.1)) if last_page - first_page > 5 else 2) \
+            if settings.THREADING else 1
         self.file_name = os.path.basename(file_url)
         self.pages = []
         self.results = []
         self.get_pages()
-        os.removedirs(self.folders["pages_img"])
+        shutil.rmtree(self.folders["pages_img"], ignore_errors=True)
 
     def get_pages(self):
         print(f"Downloading {self.file_url}")
@@ -97,9 +98,10 @@ class Page:
         image_height, image_width, channels = self.image.shape
         x, y, w, h = cv2.boundingRect(contour)
         if w > self.pdf.threshold[0] and h > self.pdf.threshold[1]:
+            region_id = str(self.page_number).zfill(3) + "_" + str(contour_id).zfill(2)
             cropped_image = self.image[y:y + h, x:x + w]
             cropped_file_path = os.path.join(self.pdf.folders["quotes_img"],
-                                             str(self.page_number).zfill(3) + "_" + str(contour_id).zfill(2) + '.png')
+                                             region_id + '.png')
             print(f'Saving contour {contour_id} to {cropped_file_path}')
             text = pytesseract.image_to_string(cropped_image, lang=settings.OCR_LANG, config='--psm 1')
             text = text_cleaner(text)
@@ -108,7 +110,6 @@ class Page:
             cv2.imwrite(cropped_file_path, cropped_image)
             print(text)
             bbox = Bbox(x, y, w, h, image_width, image_height)
-            region_id = str(uuid4())
             result = {
                 'region_id': region_id,
                 'text': text,
