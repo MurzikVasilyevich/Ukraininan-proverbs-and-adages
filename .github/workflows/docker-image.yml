@@ -32,5 +32,5 @@ jobs:
         uses: actions/upload-artifact@v3
         with:
           name: ocr_book_data
-          path: temp/
+          path: data/
           if-no-files-found: error # 'warn' or 'ignore' are also available, defaults to `warn`

@@ -1,5 +1,5 @@
 SOURCES_FILE = 'sources.csv'
-RESULTS_FOLDER = 'temp/results'
+DATA_FOLDER = 'data'
 THREADING = True
 OCR = True
 OCR_LANG = 'ukr'

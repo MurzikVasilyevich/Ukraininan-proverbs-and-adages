@@ -1,4 +1,3 @@
-import re
 import concurrent.futures
 import math
 import os
@@ -11,40 +10,17 @@ import requests
 from pdf2image import convert_from_bytes
 
 import settings
-
-
-def text_cleaner(text):
-    text = text.replace('\n', ' ')
-    text = text.replace('\r', ' ')
-    text = text.replace('\t', ' ')
-    text = text.replace('  ', ' ')
-    text = re.sub(r'^\s*[жз]\.*\s+', '', text)
-    text = re.sub(r',\s*$', '.', text)
-    text = re.sub(r"\s+[жз]\.*\s*$", '', text)
-    text = re.sub(r" \w--  ", '', text)
-    text = re.sub(r"^\W", '', text)
-    text = re.sub(r"(\w)- (\w)", r'\1\2', text)
-    text = re.sub(r"(\w)(--)(\s+)", r'\1 - ', text)
-    text = re.sub(r"--", r'', text)
-    text = " ".join(text.split())
-    return text
-
-
-def text_filter(text):
-    digits = re.compile(r"^\d*$")
-    non_words = re.compile(r"^\W*$")
-    if digits.match(text):
-        return False
-    if len(text) < 3:
-        return False
-    if non_words.match(text):
-        return False
-
-    return True
+from text_tools import text_cleaner, text_filter
 
 
 class PdfFile:
-    def __init__(self, file_url, pages_folder, first_page, last_page, morph_rect, threshold):
+    def __init__(self, file_url, pdf_folder, first_page, last_page, morph_rect, threshold):
+        self.pdf_folder = pdf_folder
+        self.folders = {
+            'pages_img': create_folder(os.path.join(self.pdf_folder, "pages_img")),
+            'pages_OCR': create_folder(os.path.join(self.pdf_folder, "pages_OCR")),
+            'quotes_img': create_folder(os.path.join(self.pdf_folder, "quotes_img"))
+        }
         self.file_url = file_url
         self.first_page = first_page
         self.last_page = last_page
@@ -52,15 +28,14 @@ class PdfFile:
         self.threshold = threshold
         self.thread_count = (5 if last_page - first_page > 5 else int(
             math.ceil((last_page - first_page) * 0.1))) if settings.THREADING else 1
-        self.pages_folder = pages_folder
         self.file_name = os.path.basename(file_url)
         self.pages = []
         self.results = []
         self.get_pages()
+        os.removedirs(self.folders["pages_img"])
 
     def get_pages(self):
         print(f"Downloading {self.file_url}")
-        create_folder(os.path.join(self.pages_folder, "pages"))
         pdf = requests.get(self.file_url, stream=True)
         print(f"Working in {self.thread_count} threads") if settings.THREADING else print("Working in 1 thread")
         pages = convert_from_bytes(pdf.raw.read(),
@@ -69,19 +44,19 @@ class PdfFile:
         print(f"Processing {len(pages)} pages")
         if settings.THREADING:
             with concurrent.futures.ThreadPoolExecutor() as page_executor:
-                page_executor.map(self.save_page_file, pages, range(len(pages)))
+                page_executor.map(self.process_page_file, pages, range(len(pages)))
         else:
             for i, page in enumerate(pages):
-                self.save_page_file(page, i)
+                self.process_page_file(page, i)
 
-    def save_page_file(self, image, i):
-        create_folder(os.path.join(self.pages_folder, "pages", str(i).zfill(3)))
-        filepath_rel = os.path.join(self.pages_folder, "pages", str(i).zfill(3) + '.png')
+    def process_page_file(self, image, i):
+        filepath_rel = os.path.join(self.folders["pages_img"], str(i).zfill(3) + '.png')
         image.save(filepath_rel, 'png')
         print(f'Saving page {i} to {filepath_rel}')
         if settings.OCR:
             page = Page(self, filepath_rel, i)
             self.pages.append(page)
+        os.remove(filepath_rel)
 
 
 class Page:
@@ -116,17 +91,15 @@ class Page:
         df = pd.DataFrame(self.results)
         df.sort_values(by=['page', 'contour'], ascending=[True, True], inplace=True)
         df_text = df['text']
-        df_text.to_csv(os.path.join(self.pdf.pages_folder, str(self.page_number).zfill(3) + '.csv'))
+        df_text.to_csv(os.path.join(self.pdf.folders["pages_OCR"], str(self.page_number).zfill(3) + '.csv'))
 
     def get_text(self, contour, contour_id):
         image_height, image_width, channels = self.image.shape
         x, y, w, h = cv2.boundingRect(contour)
         if w > self.pdf.threshold[0] and h > self.pdf.threshold[1]:
             cropped_image = self.image[y:y + h, x:x + w]
-            cropped_file_path = os.path.join(self.pdf.pages_folder,
-                                             "pages",
-                                             str(self.page_number).zfill(3),
-                                             str(contour_id).zfill(2) + '.png')
+            cropped_file_path = os.path.join(self.pdf.folders["quotes_img"],
+                                             str(self.page_number).zfill(3) + "_" + str(contour_id).zfill(2) + '.png')
             print(f'Saving contour {contour_id} to {cropped_file_path}')
             text = pytesseract.image_to_string(cropped_image, lang=settings.OCR_LANG, config='--psm 1')
             text = text_cleaner(text)
@@ -166,31 +139,32 @@ class PdfFiles:
         self.get_files()
 
     def get_files(self):
+        create_folder(folder=settings.DATA_FOLDER)
         sources = pd.read_csv(self.sources_file)
         for index, row in sources.iterrows():
             file_url = row['file_url']
-            pages_folder = os.path.join('temp', row['alias'])
+            pdf_folder = os.path.join(settings.DATA_FOLDER, row['alias'])
             alias = row['alias']
             first_page = int(row['first_page'])
             last_page = int(row['last_page'])
             morph_rect = eval(row['MORPH_RECT'])
             threshold = eval(row['THRESHOLD'])
-            os.makedirs(pages_folder, exist_ok=True)
-            pdf_file = PdfFile(file_url, pages_folder, first_page, last_page, morph_rect, threshold)
+            os.makedirs(pdf_folder, exist_ok=True)
+            pdf_file = PdfFile(file_url, pdf_folder, first_page, last_page, morph_rect, threshold)
             self.files.append(pdf_file)
             if settings.OCR:
                 df = pd.DataFrame(pdf_file.results)
-                df.sort_values(by=['page', 'contour'], ascending=[True, False], inplace=True)
-                df.to_csv(os.path.join(settings.RESULTS_FOLDER, f'{alias}.csv'), index=False)
+                df.sort_values(by=['page', 'contour'], ascending=[True, True], inplace=True)
+                df.to_csv(os.path.join(settings.DATA_FOLDER, f'{alias}.csv'), index=False)
 
 
 def main():
-    create_folder(folder=settings.RESULTS_FOLDER)
     PdfFiles(settings.SOURCES_FILE)
 
 
 def create_folder(folder):
     os.makedirs(folder) if not os.path.exists(folder) else None
+    return folder
 
 
 if __name__ == '__main__':
